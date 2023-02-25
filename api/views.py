@@ -9,14 +9,78 @@ from geopy.distance import distance
 from .models import Valve, Tree
 from .serializers import *
 
-@api_view(['GET'])
-def show_all(request):
-    valve = Valve.objects.all()
-    point = Tree.objects.all()
 
-    valve_ser = ValveSerializer(valve, many = True)
-    point_ser = TreeSerializer(point, many = True)
-    return Response({'valves': valve_ser.data, 'points': point_ser.data})
+@api_view(['POST', 'GET', 'DELETE'])
+@parser_classes([MultiPartParser, FormParser])
+def valve_handle(request):
+
+    #read valves data from excel
+    if request.method == 'POST':
+        file = request.FILES.get('file')
+        if not file:
+            return Response({'error': 'No file was submitted'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Load the Excel file into a pandas DataFrame
+        try:
+            df = pd.read_excel(file, usecols=['Latitude', 'Longitude'], dtype={'Long': float, 'Lat': float})
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Create a list of Tree objects from the DataFrame
+        valves = []
+        for _, row in df.iterrows():
+            valves.append(Valve(lat = row['Latitude'], long = row['Longitude'],))
+
+        # Bulk create the Tree objects in the database
+        Valve.objects.bulk_create(valves)
+
+        return Response({'message': f'{len(valves)} trees were successfully added.'}, status=status.HTTP_201_CREATED)
+    
+    #read all the valves    
+    elif request.method == 'GET':
+        snippet = Valve.objects.all()
+        serializer = ValveSerializer(snippet, many = True)
+        return Response({'data':serializer.data})
+    
+    #delete all the valves
+    elif request.method == 'DELETE':
+        Valve.objects.all().delete()
+
+
+@api_view(['POST', 'GET', 'PUT', 'DELETE'])
+@parser_classes([MultiPartParser, FormParser])
+def valve_details(request, pk = None):
+
+    #upload a single valve data
+    if request.method == "POST":
+        serializer = ValveSerializer(data = request.data)
+        if serializer.is_valid():
+            serializer.save()
+            return Response({'data':'success'})
+        else:
+            return Response({'data':'failed to upload data'})
+        
+    #get the data of a single valve
+    elif request.method == 'GET':
+        snippet = Valve.objects.get(id = pk)
+        serializer = ValveSerializer(snippet, many = False)
+        return Response({'data':serializer.data})
+    
+    #update the data of a single valve
+    elif request.method == 'PUT':
+        snippet = Valve.objects.get(id = pk)
+        serializer = ValveSerializer(snippet, data = request.data)
+        if serializer.is_valid():
+            serializer.save()
+            return Response({"data": serializer.data})
+        else:
+            return Response({"error":serializer.errors})
+    #soft delete a single valve (to avoid database conflicts)
+    elif request.method == 'DELETE':
+        snippet = Valve.objects.get(id = pk)
+        snippet.soft_delete = True
+        snippet.save()
+        return Response({'data':'successfully deleted'})
 
 
 @api_view(['POST', 'GET', 'DELETE'])
@@ -110,9 +174,17 @@ def calculate_coordinates(request):
 
         return Response({"data":"assigning completed"})
 
+
+#get the trees for each valve
+@api_view(['GET'])
+def show_assigned(request):
+    snippet = Valve.objects.all()
+    serializer = ValveSerializer_2(snippet, many = True)
+    return Response({'data':serializer.data})
+
+#get the trees of a valve
 @api_view(['GET'])
 def get_valve_trees(request, pk):
-    valve = Valve.objects.get(pk = pk)
-    trees = Tree.objects.filter(valve = valve)
-    serializer = TreeSerializer(trees, many = True)
+    snippet = Valve.objects.get(pk = pk)
+    serializer = ValveSerializer_2(snippet, many = False)
     return Response({'data':serializer.data})
